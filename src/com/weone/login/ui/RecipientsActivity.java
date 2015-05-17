@@ -1,0 +1,327 @@
+package com.weone.login.ui;
+
+import java.util.ArrayList;
+import java.util.List;
+
+import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.Intent;
+import android.net.Uri;
+import android.os.Bundle;
+import android.util.Log;
+import android.view.Menu;
+import android.view.MenuItem;
+import android.view.View;
+import android.view.Window;
+import android.widget.AdapterView;
+import android.widget.AdapterView.OnItemClickListener;
+import android.widget.GridView;
+import android.widget.ImageView;
+import android.widget.ListView;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import com.parse.FindCallback;
+import com.parse.ParseException;
+import com.parse.ParseFile;
+import com.parse.ParseInstallation;
+import com.parse.ParseObject;
+import com.parse.ParsePush;
+import com.parse.ParseQuery;
+import com.parse.ParseRelation;
+import com.parse.ParseUser;
+import com.parse.SaveCallback;
+import com.weone.login.R;
+import com.weone.login.adapters.UserAdapter;
+import com.weone.login.utils.FileHelper;
+import com.weone.login.utils.ParseConstants;
+
+public class RecipientsActivity extends Activity {
+	
+	public static final String TAG = RecipientsActivity.class.getSimpleName();
+	
+	protected List<ParseUser> mFriends;
+	protected ParseRelation<ParseUser> mFriendRelations;
+	protected ParseUser mCurrentUser;
+	protected Uri mMediaUri;
+	protected String mFileType;
+	protected GridView mGridView;	
+	protected MenuItem mSendMenuItem;
+	protected String mMessageType;
+	protected String mContent;
+	
+
+	@Override
+	protected void onCreate(Bundle savedInstanceState) {
+		super.onCreate(savedInstanceState);
+		requestWindowFeature(Window.FEATURE_INDETERMINATE_PROGRESS);
+		setContentView(R.layout.user_grid);
+		
+		
+		Intent intent = getIntent();
+		mMessageType = intent.getStringExtra("MESSAGE_TYPE");
+		Log.i(TAG, "the intent type was "+mMessageType);
+		mContent = intent.getStringExtra(ParseConstants.KEY_MESSAGE_TEXT);
+		Log.i(TAG, "the Content was "+mContent);
+		
+		mGridView = (GridView)findViewById(R.id.friendsGrid);
+		TextView EmptyTextView = (TextView)findViewById(android.R.id.empty);
+		mGridView.setEmptyView(EmptyTextView);
+		
+		mMediaUri = getIntent().getData();	
+		mFileType = getIntent().getExtras().getString(ParseConstants.KEY_FILE_TYPE);
+		mGridView.setChoiceMode(ListView.CHOICE_MODE_MULTIPLE);
+		mGridView.setOnItemClickListener(mOnItemClickListener);
+	}
+
+	@Override
+	public void onResume() {
+		super.onResume();
+
+		mCurrentUser = ParseUser.getCurrentUser();
+		mFriendRelations = mCurrentUser
+				.getRelation(ParseConstants.KEY_FRIENDS_RELATION);
+		
+
+		setProgressBarIndeterminateVisibility(true);
+		
+		ParseQuery<ParseUser> query = mFriendRelations.getQuery();
+		
+		
+		query.addAscendingOrder(ParseConstants.KEY_USERNAME);
+		query.findInBackground(
+				new FindCallback<ParseUser>() {
+
+					@Override
+					public void done(List<ParseUser> friends, ParseException e) {
+						setProgressBarIndeterminateVisibility(false);
+						mFriends = friends;
+						
+						if(e == null){
+							String[] usernames = new String[mFriends.size()];
+							int i = 0;
+							for (ParseUser user : mFriends) {
+								usernames[i] = user.getUsername();
+								i++;
+							}
+							
+
+							if(mGridView.getAdapter() == null) {
+								UserAdapter adapter = new UserAdapter(RecipientsActivity.this, mFriends);
+								mGridView.setAdapter(adapter);
+							}
+							else {
+								( (UserAdapter)mGridView.getAdapter() ).refill(mFriends);
+							}						
+							
+						}
+						else{
+							Log.e(TAG, e.getMessage());
+
+							AlertDialog.Builder builder = new AlertDialog.Builder(
+									mGridView.getContext());
+							builder.setMessage(e.getMessage());
+							builder.setTitle(R.string.error_title);
+							builder.setPositiveButton(android.R.string.ok, null);
+
+							AlertDialog dialog = builder.create();
+							dialog.show();
+						}
+					}
+				});
+				
+ }
+		
+	
+	@Override
+	public boolean onCreateOptionsMenu(Menu menu) {
+		// Inflate the menu; this adds items to the action bar if it is present.
+		getMenuInflater().inflate(R.menu.recipients, menu);
+		mSendMenuItem = menu.getItem(0);
+		
+		return true;
+	}
+
+	@Override
+	public boolean onOptionsItemSelected(MenuItem item) {
+		// Handle action bar item clicks here. The action bar will
+		// automatically handle clicks on the Home/Up button, so long
+		// as you specify a parent activity in AndroidManifest.xml.
+		int id = item.getItemId();
+		if (id == R.id.action_settings) {
+			return true;
+		}
+		else if(id == R.id.action_send) {
+			
+			Log.i(TAG, "entered onoptionsselected send case");
+			if(mMessageType.equalsIgnoreCase("TEXT") ) {
+				ParseObject message = createTextMessage();
+				Log.i(TAG, "message created ");
+				
+				if(message == null) {
+					//error
+					AlertDialog.Builder builder = new AlertDialog.Builder(this);
+					builder.setMessage(R.string.error_selecting_file)
+						.setTitle(R.string.error_title_sorry)
+						.setPositiveButton(android.R.string.ok, null);
+					AlertDialog dialog = builder.create();
+					dialog.show();
+				}
+				else {
+					Log.i(TAG, "Sending message");
+					send(message);
+					finish();
+				}
+				
+				
+			}
+			else {
+				ParseObject message = createMessage();
+
+				if(message == null) {
+					//error
+					AlertDialog.Builder builder = new AlertDialog.Builder(this);
+					builder.setMessage(R.string.error_selecting_file)
+						.setTitle(R.string.error_title_sorry)
+						.setPositiveButton(android.R.string.ok, null);
+					AlertDialog dialog = builder.create();
+					dialog.show();
+				}
+				else {
+					send(message);
+					finish();
+				}
+			
+		}
+		
+			return true;
+		}
+		return super.onOptionsItemSelected(item);
+	}
+	/*
+	@Override
+	protected void onListItemClick(ListView l, View v, int position, long id) {	
+		super.onListItemClick(l, v, position, id);
+		
+		
+	}
+
+	*/
+	protected ParseObject createMessage() {
+		ParseObject message = new ParseObject(ParseConstants.CLASS_MESSAGES);
+		
+		message.put(ParseConstants.KEY_SENDER_ID, ParseUser.getCurrentUser().getObjectId());
+		message.put(ParseConstants.KEY_SENDER_NAME, ParseUser.getCurrentUser().getUsername());
+		message.put(ParseConstants.KEY_RECIPIENT_IDS, getRecipientIds());
+		message.put(ParseConstants.KEY_FILE_TYPE, mFileType);
+		//message.put("text", "hello.testing");
+		
+		byte[] fileBytes = FileHelper.getByteArrayFromFile(this, mMediaUri);
+		
+		if(fileBytes == null) {
+			return null;
+		}
+		else {
+			if(mFileType.equals(ParseConstants.TYPE_IMAGE)) {
+				fileBytes = FileHelper.reduceImageForUpload(fileBytes);
+			}
+			
+			String fileName = FileHelper.getFileName(this, mMediaUri, mFileType);
+			ParseFile file = new ParseFile(fileName, fileBytes);
+			message.put(ParseConstants.KEY_FILE, file);
+			
+			return message;
+		}
+	}
+	
+	protected ParseObject createTextMessage() {
+		
+		Log.i(TAG, "Creating message now.");
+		ParseObject message = new ParseObject(ParseConstants.CLASS_TEXT_MESSAGES);
+	
+		message.put(ParseConstants.KEY_SENDER_ID, ParseUser.getCurrentUser().getObjectId());
+		message.put(ParseConstants.KEY_SENDER_NAME, ParseUser.getCurrentUser().getUsername());
+		message.put(ParseConstants.KEY_RECIPIENT_IDS, getRecipientIds());
+		message.put(ParseConstants.KEY_FILE_TYPE, mMessageType);
+		message.put(ParseConstants.KEY_MESSAGE_TEXT, mContent);
+		
+		return message;
+	}
+	
+	protected ArrayList<String> getRecipientIds() {
+		ArrayList<String> recipientIds = new ArrayList<String>();
+		
+		for( int i = 0 ; i< mGridView.getCount(); i++) {
+			
+			if(mGridView.isItemChecked(i)) {
+				recipientIds.add(mFriends.get(i).getObjectId());
+			}
+		}
+		
+		return recipientIds;
+	}
+	
+	protected void send(ParseObject message) {
+		//basically, just save on parse.com
+		
+		message.saveInBackground(new SaveCallback() {
+			
+			@Override
+			public void done(ParseException e) {
+				if(e == null) {
+					//success
+					sendPushNotification();//send push
+					Toast.makeText(RecipientsActivity.this, R.string.success_message, Toast.LENGTH_LONG).show();
+					
+				}
+				else {
+					AlertDialog.Builder builder = new AlertDialog.Builder(RecipientsActivity.this);
+					builder.setMessage(R.string.error_sending_message)
+						.setTitle(R.string.error_title_sorry)
+						.setPositiveButton(android.R.string.ok, null);
+					AlertDialog dialog = builder.create();
+					dialog.show();
+				}
+			}
+		});
+		
+	}
+	
+	protected OnItemClickListener mOnItemClickListener = new OnItemClickListener() {
+
+		@Override
+		public void onItemClick(AdapterView<?> parent, View view, int position,
+				long id) {
+			
+			ImageView checkImageView = (ImageView)view.findViewById(R.id.checkImageView);
+			
+			if (mGridView.isItemChecked(position)) {
+				// create friend
+				mFriendRelations.add(mFriends.get(position));
+				checkImageView.setVisibility(View.VISIBLE);
+			} else {
+				// remove friend
+				mFriendRelations.remove(mFriends.get(position));
+				checkImageView.setVisibility(View.INVISIBLE);
+			}
+			
+			if(mGridView.getCheckedItemCount() == 0)
+				mSendMenuItem.setVisible(false);
+			else
+				mSendMenuItem.setVisible(true);
+		}
+	};
+	
+	protected void sendPushNotification() {
+		ParseQuery<ParseInstallation> query = ParseInstallation.getQuery();
+		query.whereContainedIn(ParseConstants.KEY_USER_ID, getRecipientIds());
+		
+		
+		ParsePush push = new ParsePush();
+		
+		push.setQuery(query);
+		push.setMessage(getString(R.string.push_message,
+				ParseUser.getCurrentUser().getUsername()));
+		push.sendInBackground();
+	}
+}
